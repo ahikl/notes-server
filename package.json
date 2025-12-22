@@ -1,18 +1,40 @@
 {
 	"name": "notes-server",
-	"version": "0.0.0",
+	"version": "0.0.1",
+	"type": "module",
 	"private": true,
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"db:setup": "wrangler d1 migrations apply notes-db --local",
+		"db:setup:prod": "wrangler d1 migrations apply notes-db --remote",
+		"cf-typegen": "wrangler types",
+		"prepare": "husky",
+		"format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,md}\"",
+		"lint": "eslint \"src/**/*.ts\" --fix"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
+		"@typescript-eslint/eslint-plugin": "^8.50.0",
+		"@typescript-eslint/parser": "^8.50.0",
+		"eslint": "^9.39.2",
+		"eslint-config-prettier": "^10.1.8",
+		"husky": "^9.1.7",
+		"lint-staged": "^16.2.7",
+		"prettier": "^3.7.4",
 		"typescript": "^5.5.2",
+		"typescript-eslint": "^8.50.0",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.56.0"
+	},
+	"dependencies": {
+		"hono": "^4.11.1"
+	},
+	"lint-staged": {
+		"*.{ts,tsx,js,jsx,json,css,scss,md}": [
+			"prettier --write"
+		]
 	}
 }
