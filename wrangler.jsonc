@@ -9,7 +9,14 @@
 	"compatibility_date": "2025-12-21",
 	"observability": {
 		"enabled": true
-	}
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "notes-db",
+			"database_id": "30f01a88-9f7f-4fb3-8483-1474342d5eed" //  D1数据库ID
+		}
+	]
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
