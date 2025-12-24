@@ -6,7 +6,14 @@ interface SqlCountResult {
 
 export const NoteRepo = {
 	// 分页查询笔记列表
-	findAll: (db: D1Database, options: { search?: string; page: number; limit: number }): Promise<PaginatedResult<Partial<Note>>> =>
+	findAll: (
+		db: D1Database,
+		options: {
+			search?: string;
+			page: number;
+			limit: number;
+		},
+	): Promise<PaginatedResult<Partial<Note>>> =>
 		(({ search, page, limit }) => {
 			const offset = (page - 1) * limit;
 			let whereClause = '';
@@ -22,15 +29,15 @@ export const NoteRepo = {
 					db
 						.prepare(
 							`SELECT COUNT(*) as total
-									FROM notes${whereClause}`,
+							 FROM notes${whereClause}`,
 						)
 						.bind(...params),
 					db
 						.prepare(
-							`SELECT id, title, is_encrypted,created_at, updated_at
-					 FROM notes${whereClause}
-					 ORDER BY created_at DESC
-					 LIMIT ? OFFSET ?`,
+							`SELECT id, title, is_encrypted, created_at, updated_at
+							 FROM notes${whereClause}
+							 ORDER BY created_at DESC
+							 LIMIT ? OFFSET ?`,
 						)
 						.bind(...params, limit, offset),
 				])
@@ -49,10 +56,13 @@ export const NoteRepo = {
 	findById: (db: D1Database, id: string): Promise<Note | null> => db.prepare('SELECT * FROM notes WHERE id = ?').bind(id).first<Note>(),
 
 	// 创建笔记
-	create: (db: D1Database, data: { title: string; content: string }) =>
-		db.prepare('INSERT INTO notes (title, content) VALUES (?, ?)').bind(data.title, data.content).run(),
+	create: (db: D1Database, data: { id: string; title: string; content: string; is_encrypted: number }) =>
+		db
+			.prepare('INSERT INTO notes (id,title, content, is_encrypted) VALUES (?, ?,?,?)')
+			.bind(data.id, data.title, data.content, data.is_encrypted)
+			.run(),
 	// 更新笔记
-	update: (db: D1Database, id: string, data: { title?: string; content?: string }) => {
+	update: (db: D1Database, id: string, data: { title?: string; content?: string; is_encrypted?: number }) => {
 		const [sets, params] = Object.entries(data).reduce(
 			([accSets, accParams], [key, value]) => {
 				if (value !== undefined) {
@@ -67,7 +77,9 @@ export const NoteRepo = {
 		if (sets.length === 0) return Promise.resolve(null);
 
 		sets.push('updated_at = CURRENT_TIMESTAMP');
-		const query = `UPDATE notes SET ${sets.join(', ')} WHERE id = ?`;
+		const query = `UPDATE notes
+									 SET ${sets.join(', ')}
+									 WHERE id = ?`;
 		params.push(id);
 
 		return db
