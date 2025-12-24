@@ -48,16 +48,27 @@ notes.post('/', async (c) => {
 	const body = await c.req.json();
 	if (!body.title || !body.content) {
 		return c.json({ error: 'BAD_REQUEST', message: '标题和内容不能为空' }, 400);
-	}
-	const result = await NoteRepo.create(c.env.DB, body);
-	return c.json({ success: true, id: result.meta.last_row_id }, 201);
+	} // 生成 ISO 8601 格式的当前时间
+	const now = new Date().toISOString();
+	const noteData = {
+		...body,
+		created_at: now,
+		updated_at: now,
+	};
+	await NoteRepo.create(c.env.DB, noteData);
+	return c.json({ success: true }, 201);
 });
 
 // 更新笔记
 notes.patch('/:id', async (c) => {
 	const id = c.req.param('id');
 	const body = await c.req.json();
-	const result = await NoteRepo.update(c.env.DB, id, body);
+	const now = new Date().toISOString();
+	const noteData = {
+		...body,
+		updated_at: now,
+	};
+	const result = await NoteRepo.update(c.env.DB, id, noteData);
 	if (!result) return c.json({ error: 'BAD_REQUEST', message: '没有可更新的字段' }, 400);
 	return c.json({ success: true });
 });

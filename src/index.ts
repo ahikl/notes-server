@@ -39,9 +39,10 @@ app.notFound((c) =>
 export default app;
 
 export interface Note {
-	id: number;
+	id: string;
 	title: string;
 	content: string;
+	is_encrypted: number;
 	created_at: string;
 	updated_at: string;
 }
