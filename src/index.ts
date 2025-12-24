@@ -10,12 +10,11 @@ export interface Env {
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors());
+
 app.route('/api/notes', noteRoutes);
 
-app.onError((err, c) => {
-	console.error(`[Global Error] ${c.req.method} ${c.req.url}:`, err);
-
-	return c.json(
+app.onError((err, c) =>
+	c.json(
 		{
 			success: false,
 			error: err.name || 'InternalError',
@@ -23,19 +22,19 @@ app.onError((err, c) => {
 			timestamp: new Date().toISOString(),
 		},
 		500,
-	);
-});
+	),
+);
 
-app.notFound((c) => {
-	return c.json(
+app.notFound((c) =>
+	c.json(
 		{
 			success: false,
 			error: 'NOT_FOUND',
 			message: '请求的资源不存在',
 		},
 		404,
-	);
-});
+	),
+);
 
 export default app;
 
