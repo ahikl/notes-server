@@ -2,7 +2,7 @@
 
 ## 概述
 
-这是一个用于管理笔记的 RESTful API 服务，使用 Hono 框架构建，支持创建、读取、更新和删除笔记。笔记ID使用UUID格式。
+这是一个用于管理笔记的 RESTful API 服务，使用 Hono 框架构建，支持创建、读取、更新、删除和同步笔记。笔记ID使用UUID格式。
 
 ## 基础信息
 
@@ -214,7 +214,68 @@ curl -X DELETE \
 }
 ```
 
-### 6. 导出所有笔记
+### 6. 笔记同步
+
+**POST** `/api/notes/sync`
+
+#### 请求体
+
+```json
+{
+	"clientNotes": [
+		{
+			"id": "550e8400-e29b-41d4-a716-446655440000",
+			"title": "笔记标题",
+			"content": "笔记内容",
+			"is_encrypted": 0,
+			"created_at": "2025-12-24T05:43:29.724Z",
+			"updated_at": "2025-12-24T06:00:00.000Z"
+		}
+	]
+}
+```
+
+#### 请求示例
+
+```bash
+curl -X POST \
+  "https://your-domain.com/api/notes/sync" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientNotes": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "title": "客户端笔记",
+        "content": "客户端笔记内容",
+        "is_encrypted": 0,
+        "created_at": "2025-12-24T05:43:29.724Z",
+        "updated_at": "2025-12-24T06:00:00.000Z"
+      }
+    ]
+  }'
+```
+
+#### 响应示例
+
+```json
+{
+	"success": true,
+	"updates": [
+		{
+			"id": "550e8400-e29b-41d4-a716-446655440001",
+			"title": "服务器笔记",
+			"content": "服务器笔记内容",
+			"is_encrypted": 0,
+			"created_at": "2025-12-24T05:43:29.724Z",
+			"updated_at": "2025-12-24T07:00:00.000Z"
+		}
+	],
+	"syncedIds": ["550e8400-e29b-41d4-a716-446655440000"]
+}
+```
+
+### 7. 导出所有笔记
 
 **GET** `/api/notes/export/all`
 
