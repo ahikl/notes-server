@@ -16,7 +16,9 @@ export interface Env {
 export interface Note {
 	id: string;
 	title: string;
-	content: string;
+	content: string; // Base64编码的二进制数据
+	iv?: string; // Base64编码的IV（初始化向量）
+	auth_tag?: string; // Base64编码的认证标签
 	is_encrypted: number;
 	is_deleted: number;
 	created_at: string;

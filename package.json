@@ -6,6 +6,7 @@
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
+		"dev:lan": "wrangler dev --ip 0.0.0.0",
 		"start": "wrangler dev",
 		"test": "vitest",
 		"db:setup": "wrangler d1 migrations apply notes-db --local",
