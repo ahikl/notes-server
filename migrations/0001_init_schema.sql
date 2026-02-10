@@ -2,8 +2,10 @@ CREATE TABLE notes
 (
 	id           TEXT PRIMARY KEY NOT NULL,
 	title        TEXT             NOT NULL,
-	content      TEXT             NOT NULL,
-	is_encrypted INTEGER          NOT NULL DEFAULT 0,
+	content      BLOB             NOT NULL,
+	iv           BLOB,
+	auth_tag     BLOB,
+	is_encrypted INTEGER          NOT NULL DEFAULT 1,
 	is_deleted   INTEGER          NOT NULL DEFAULT 0,
 	created_at   TEXT             NOT NULL,
 	updated_at   TEXT             NOT NULL

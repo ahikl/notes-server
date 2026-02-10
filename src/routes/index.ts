@@ -73,6 +73,7 @@ notes.post('/', async (c) => {
 
 	const noteData = {
 		...body,
+		is_encrypted: body.is_encrypted ?? 1,
 		created_at: validatedCreatedAt,
 		updated_at: validatedUpdatedAt,
 	};
@@ -104,7 +105,30 @@ notes.patch('/:id', async (c) => {
 	return c.json({ success: true });
 });
 
-// 删除笔记
+// 批量删除笔记 - 必须放在 /:id 路由之前
+notes.delete('/batch', async (c) => {
+	try {
+		const { ids }: { ids: string[] } = await c.req.json();
+
+		if (!Array.isArray(ids) || ids.length === 0) {
+			return c.json({ error: 'BAD_REQUEST', message: 'ID列表不能为空' }, 400);
+		}
+
+		// 验证每个ID是否为有效字符串
+		const invalidIds = ids.filter((id) => typeof id !== 'string' || !id.trim());
+		if (invalidIds.length > 0) {
+			return c.json({ error: 'BAD_REQUEST', message: '所有ID必须为非空字符串' }, 400);
+		}
+
+		const deletedCount = await NoteRepo.deleteMany(c.env.DB, ids);
+		return c.json({ success: true, deletedCount, requestedCount: ids.length });
+	} catch (error) {
+		console.error('Batch delete error:', error);
+		return c.json({ error: 'BAD_REQUEST', message: '请求数据格式错误' }, 400);
+	}
+});
+
+// 删除单条笔记 - 放在 /batch 路由之后
 notes.delete('/:id', async (c) => {
 	const id = c.req.param('id');
 	await NoteRepo.delete(c.env.DB, id);
@@ -114,9 +138,19 @@ notes.delete('/:id', async (c) => {
 // 同步笔记接口
 notes.post('/sync', async (c) => {
 	try {
-		const { clientNotes }: { clientNotes: Note[] } = await c.req.json();
+		const { clientNotes, deletedIds }: { clientNotes: Note[]; deletedIds?: string[] } = await c.req.json();
 		if (!Array.isArray(clientNotes)) {
 			return c.json({ error: 'Invalid request', message: 'clientNotes must be an array' }, 400);
+		}
+
+		// 处理客户端已删除的笔记
+		let syncDeletedCount = 0;
+		if (deletedIds && Array.isArray(deletedIds) && deletedIds.length > 0) {
+			// 验证每个ID是否为有效字符串
+			const validIds = deletedIds.filter((id) => typeof id === 'string' && id.trim());
+			if (validIds.length > 0) {
+				syncDeletedCount = await NoteRepo.deleteMany(c.env.DB, validIds);
+			}
 		}
 
 		// 获取服务器上已存在的笔记
@@ -165,10 +199,45 @@ notes.post('/sync', async (c) => {
 			success: true,
 			updates: toDownload,
 			syncedIds: syncedIds,
+			deletedCount: syncDeletedCount,
 		});
 	} catch (error) {
 		console.error('Sync error:', error);
 		return c.json({ error: 'Sync failed', message: '同步失败' }, 500);
+	}
+});
+
+// 批量插入或更新笔记
+notes.post('/batch', async (c) => {
+	try {
+		const { notes }: { notes: Note[] } = await c.req.json();
+
+		if (!Array.isArray(notes) || notes.length === 0) {
+			return c.json({ error: 'BAD_REQUEST', message: '笔记列表不能为空' }, 400);
+		}
+
+		// 验证每条笔记数据
+		for (const note of notes) {
+			if (!note.id || !note.title || note.content === undefined) {
+				return c.json({ error: 'BAD_REQUEST', message: '每条笔记必须包含ID、标题和内容' }, 400);
+			}
+
+			// 验证ID格式（基本验证）
+			if (typeof note.id !== 'string' || !note.id.trim()) {
+				return c.json({ error: 'BAD_REQUEST', message: '笔记ID必须为非空字符串' }, 400);
+			}
+
+			// 验证标题和内容
+			if (typeof note.title !== 'string' || typeof note.content !== 'string') {
+				return c.json({ error: 'BAD_REQUEST', message: '笔记标题和内容必须为字符串' }, 400);
+			}
+		}
+
+		await NoteRepo.upsertMany(c.env.DB, notes);
+		return c.json({ success: true, insertedUpdatedCount: notes.length });
+	} catch (error) {
+		console.error('Batch upsert error:', error);
+		return c.json({ error: 'BAD_REQUEST', message: '请求数据格式错误' }, 400);
 	}
 });
 
