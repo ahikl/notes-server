@@ -200,7 +200,52 @@ export const NoteRepo = {
 		};
 	},
 
-	// 批量插入或更新笔记
+	// 批量插入笔记（用于批量上传，不覆盖已有数据）
+	insertMany: async (db: D1Database, notes: Note[]) => {
+		if (notes.length === 0) return;
+
+		const stmt = db.prepare(`
+			INSERT INTO notes (id, title, content, iv, auth_tag, is_encrypted, created_at, updated_at, is_deleted)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`);
+
+		const batchInserts = notes.map((note) => {
+			const contentBuffer = base64ToArrayBuffer(note.content);
+			const ivBuffer = note.iv ? base64ToArrayBuffer(note.iv) : null;
+			const authTagBuffer = note.auth_tag ? base64ToArrayBuffer(note.auth_tag) : null;
+			return stmt.bind(note.id, note.title, contentBuffer, ivBuffer, authTagBuffer, note.is_encrypted, note.created_at, note.updated_at);
+		});
+
+		await db.batch(batchInserts);
+	},
+
+	// 批量更新笔记（基于时间戳优先原则，只更新客户端较新的数据）
+	updateMany: async (db: D1Database, notes: Note[]) => {
+		if (notes.length === 0) return;
+
+		const stmt = db.prepare(`
+			UPDATE notes SET
+				title = ?,
+				content = ?,
+				iv = ?,
+				auth_tag = ?,
+				is_encrypted = ?,
+				updated_at = ?,
+				is_deleted = 0
+			WHERE id = ?
+		`);
+
+		const batchUpdates = notes.map((note) => {
+			const contentBuffer = base64ToArrayBuffer(note.content);
+			const ivBuffer = note.iv ? base64ToArrayBuffer(note.iv) : null;
+			const authTagBuffer = note.auth_tag ? base64ToArrayBuffer(note.auth_tag) : null;
+			return stmt.bind(note.title, contentBuffer, ivBuffer, authTagBuffer, note.is_encrypted, note.updated_at, note.id);
+		});
+
+		await db.batch(batchUpdates);
+	},
+
+	// 批量插入或更新笔记（旧方法，保留用于兼容）
 	upsertMany: async (db: D1Database, notes: Note[]) => {
 		if (notes.length === 0) return;
 
@@ -228,15 +273,37 @@ export const NoteRepo = {
 		await db.batch(batchInserts);
 	},
 
-	// 根据ID列表查询笔记
+	// 根据ID列表查询笔记（包含已删除的，用于同步）
 	findByIds: async (db: D1Database, ids: string[]): Promise<Note[]> => {
 		if (ids.length === 0) return [];
 		const placeholders = ids.map(() => '?').join(',');
-		const query = `SELECT * FROM notes WHERE id IN (${placeholders}) AND is_deleted = 0`;
+		const query = `SELECT * FROM notes WHERE id IN (${placeholders})`;
 		const result = await db
 			.prepare(query)
 			.bind(...ids)
 			.all();
 		return result.results.map((row) => convertNoteFromDb(row));
+	},
+
+	// 查询更新时间大于指定时间戳的笔记（增量同步）- 包含已删除的
+	findByUpdatedAfter: async (db: D1Database, timestamp: string): Promise<Note[]> => {
+		const result = await db.prepare('SELECT * FROM notes WHERE updated_at > ?').bind(timestamp).all();
+		return result.results.map((row) => convertNoteFromDb(row));
+	},
+
+	// 查询所有未删除的笔记ID列表
+	findAllIds: async (db: D1Database): Promise<string[]> => {
+		const result = await db.prepare('SELECT id FROM notes WHERE is_deleted = 0').all();
+		return result.results.map((row: any) => row.id as string);
+	},
+
+	// 查询所有笔记ID和删除状态（用于同步）
+	findAllWithDeletedStatus: async (db: D1Database): Promise<{ id: string; is_deleted: number; updated_at: string }[]> => {
+		const result = await db.prepare('SELECT id, is_deleted, updated_at FROM notes').all();
+		return result.results.map((row: any) => ({
+			id: row.id as string,
+			is_deleted: row.is_deleted as number,
+			updated_at: row.updated_at as string,
+		}));
 	},
 };
