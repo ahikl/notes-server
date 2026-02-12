@@ -1,6 +1,15 @@
 import { Hono } from 'hono';
 import { Env, Note } from '../index';
 import { NoteRepo } from '../db/';
+import {
+	handleSync,
+	handleIncrementalSync,
+	handleDeletionSync,
+	handleRestoreSync,
+	handleNewNotes,
+	handleFullData,
+	handleStatusCheck,
+} from './sync';
 
 const notes = new Hono<{ Bindings: Env }>();
 
@@ -135,79 +144,30 @@ notes.delete('/:id', async (c) => {
 	return c.json({ success: true });
 });
 
-// 同步笔记接口
-notes.post('/sync', async (c) => {
-	try {
-		const { clientNotes, deletedIds }: { clientNotes: Note[]; deletedIds?: string[] } = await c.req.json();
-		if (!Array.isArray(clientNotes)) {
-			return c.json({ error: 'Invalid request', message: 'clientNotes must be an array' }, 400);
-		}
+// ==================== 同步相关接口 ====================
 
-		// 处理客户端已删除的笔记
-		let syncDeletedCount = 0;
-		if (deletedIds && Array.isArray(deletedIds) && deletedIds.length > 0) {
-			// 验证每个ID是否为有效字符串
-			const validIds = deletedIds.filter((id) => typeof id === 'string' && id.trim());
-			if (validIds.length > 0) {
-				syncDeletedCount = await NoteRepo.deleteMany(c.env.DB, validIds);
-			}
-		}
+// 聚合同步接口 - 一次性完成所有同步操作
+notes.post('/sync', handleSync);
 
-		// 获取服务器上已存在的笔记
-		const clientNoteIds = clientNotes.map((note) => note.id).filter((id) => id);
-		const serverNotes = clientNoteIds.length > 0 ? await NoteRepo.findByIds(c.env.DB, clientNoteIds) : [];
+// 增量更新查询 - 获取指定时间戳后的更新
+notes.post('/sync/incremental', handleIncrementalSync);
 
-		// 将服务器笔记转换为以ID为键的对象，便于查找
-		const serverNotesMap = new Map(serverNotes.map((note) => [note.id, note]));
+// 删除同步 - 获取服务端已删除但客户端未删除的笔记
+notes.post('/sync/deletions', handleDeletionSync);
 
-		// 用于存储需要上传到服务器的笔记
-		const toUpload: Note[] = [];
-		// 用于存储需要下载到客户端的笔记
-		const toDownload: Note[] = [];
+// 恢复同步 - 获取客户端已删除但服务端未删除的笔记ID
+notes.post('/sync/restore', handleRestoreSync);
 
-		for (const clientNote of clientNotes) {
-			const serverNote = serverNotesMap.get(clientNote.id);
+// 新增笔记查询 - 获取服务端有但客户端没有的笔记ID
+notes.post('/sync/new', handleNewNotes);
 
-			if (!serverNote) {
-				// 客户端有但服务器没有的笔记，直接上传
-				toUpload.push(clientNote);
-			} else {
-				// 比较更新时间，决定是否需要上传或下载
-				const clientUpdatedTime = new Date(clientNote.updated_at).getTime();
-				const serverUpdatedTime = new Date(serverNote.updated_at).getTime();
+// 完整数据获取 - 根据ID列表获取笔记完整数据
+notes.post('/sync/full-data', handleFullData);
 
-				if (clientUpdatedTime > serverUpdatedTime) {
-					// 客户端更新，需要上传到服务器
-					toUpload.push(clientNote);
-				} else if (serverUpdatedTime > clientUpdatedTime) {
-					// 服务器更新，需要下载到客户端
-					toDownload.push(serverNote);
-				}
-				// 如果更新时间相同，则无需操作
-			}
-		}
+// 状态查询 - 获取客户端与服务端的状态差异统计
+notes.post('/sync/status', handleStatusCheck);
 
-		// 将需要上传的笔记保存到服务器
-		if (toUpload.length > 0) {
-			await NoteRepo.upsertMany(c.env.DB, toUpload);
-		}
-
-		// 返回需要下载的笔记和同步成功的ID列表
-		const syncedIds = [...toUpload, ...clientNotes.filter((note) => !serverNotesMap.has(note.id))].map((note) => note.id);
-
-		return c.json({
-			success: true,
-			updates: toDownload,
-			syncedIds: syncedIds,
-			deletedCount: syncDeletedCount,
-		});
-	} catch (error) {
-		console.error('Sync error:', error);
-		return c.json({ error: 'Sync failed', message: '同步失败' }, 500);
-	}
-});
-
-// 批量插入或更新笔记
+// 批量插入或更新笔记（基于时间戳优先原则）
 notes.post('/batch', async (c) => {
 	try {
 		const { notes }: { notes: Note[] } = await c.req.json();
@@ -231,10 +191,62 @@ notes.post('/batch', async (c) => {
 			if (typeof note.title !== 'string' || typeof note.content !== 'string') {
 				return c.json({ error: 'BAD_REQUEST', message: '笔记标题和内容必须为字符串' }, 400);
 			}
+
+			// 验证 updated_at 字段
+			if (!note.updated_at || typeof note.updated_at !== 'string') {
+				return c.json({ error: 'BAD_REQUEST', message: '每条笔记必须包含 updated_at 时间戳' }, 400);
+			}
 		}
 
-		await NoteRepo.upsertMany(c.env.DB, notes);
-		return c.json({ success: true, insertedUpdatedCount: notes.length });
+		// 1. 查询服务端现有笔记（包含已删除的）
+		const existingNotes = await NoteRepo.findByIds(
+			c.env.DB,
+			notes.map((n) => n.id),
+		);
+		const existingMap = new Map(existingNotes.map((n) => [n.id, n]));
+
+		// 2. 分类处理：根据时间戳优先原则
+		const notesToInsert: Note[] = []; // 服务端不存在的笔记
+		const notesToUpdate: Note[] = []; // 服务端存在且客户端较新的笔记
+		const notesToSkip: string[] = []; // 服务端存在且服务端较新的笔记ID
+
+		for (const note of notes) {
+			const existing = existingMap.get(note.id);
+			if (!existing) {
+				// 服务端不存在，直接插入
+				notesToInsert.push(note);
+			} else {
+				// 服务端存在，比较时间戳
+				const clientTime = new Date(note.updated_at).getTime();
+				const serverTime = new Date(existing.updated_at).getTime();
+
+				if (clientTime > serverTime) {
+					// 客户端较新，更新服务端
+					notesToUpdate.push(note);
+				} else {
+					// 服务端较新或相同，跳过，保留服务端数据
+					notesToSkip.push(note.id);
+				}
+			}
+		}
+
+		console.log(`[Batch] Insert: ${notesToInsert.length}, Update: ${notesToUpdate.length}, Skip: ${notesToSkip.length}`);
+
+		// 3. 执行批量操作
+		if (notesToInsert.length > 0) {
+			await NoteRepo.insertMany(c.env.DB, notesToInsert);
+		}
+		if (notesToUpdate.length > 0) {
+			await NoteRepo.updateMany(c.env.DB, notesToUpdate);
+		}
+
+		return c.json({
+			success: true,
+			insertedCount: notesToInsert.length,
+			updatedCount: notesToUpdate.length,
+			skippedCount: notesToSkip.length,
+			skippedIds: notesToSkip,
+		});
 	} catch (error) {
 		console.error('Batch upsert error:', error);
 		return c.json({ error: 'BAD_REQUEST', message: '请求数据格式错误' }, 400);
