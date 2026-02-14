@@ -645,7 +645,9 @@ curl -X POST "/api/notes/sync/full-data" -d '{
 
 **GET** `/api/notes/export/all`
 
-导出所有未删除的笔记（完整数据），用于数据备份。
+导出所有未删除的笔记（完整数据），用于数据备份。适用于笔记数量较少的情况（建议 < 500 条）。
+
+> 💡 **技术说明**：该接口在数据库层使用类型安全的查询，通过 `convertNoteFromDb` 函数将数据库的 `ArrayBuffer` 格式自动转换为 Base64 字符串返回给客户端。
 
 #### 请求示例
 
@@ -676,6 +678,115 @@ curl -X GET \
 	]
 }
 ```
+
+### 8.1 分页导出笔记（推荐用于大量数据）
+
+**GET** `/api/notes/export/paged`
+
+分页导出所有未删除的笔记（完整数据），适用于大量笔记导出（建议 > 500 条）。支持分批获取，避免单次请求过大。
+
+> 🔧 **性能优化**：该接口采用数据库批量查询优化，一次请求同时获取总数和分页数据，减少数据库交互次数。
+
+#### 参数
+
+| 参数名 | 类型   | 必填 | 描述                            |
+| ------ | ------ | ---- | ------------------------------- |
+| page   | number | 否   | 页码，默认为 1                  |
+| limit  | number | 否   | 每页数量，默认为 50，最大为 100 |
+
+#### 请求示例
+
+```bash
+# 获取第一页（默认每页50条）
+curl -X GET \
+  "https://your-domain.com/api/notes/export/paged" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+# 自定义分页参数
+curl -X GET \
+  "https://your-domain.com/api/notes/export/paged?page=2&limit=100" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+#### 响应示例
+
+```json
+{
+	"success": true,
+	"timestamp": "2025-12-24T05:43:29.724Z",
+	"page": 1,
+	"limit": 50,
+	"total": 1250,
+	"hasMore": true,
+	"count": 50,
+	"data": [
+		{
+			"id": "550e8400-e29b-41d4-a716-446655440000",
+			"title": "笔记1",
+			"content": "bm90ZTFCYXNlNjRFbmNvZGVkQ29udGVudA==",
+			"iv": "bm90ZTFCYXNlNjRFbmNvZGVkSVY=",
+			"auth_tag": "bm90ZTFCYXNlNjRFbmNvZGVkQXV0aFRhZw==",
+			"is_encrypted": 1,
+			"created_at": "2025-12-24T05:43:29.724Z",
+			"updated_at": "2025-12-24T05:43:29.724Z"
+		}
+	]
+}
+```
+
+#### 响应字段说明
+
+| 字段      | 类型    | 描述                                     |
+| --------- | ------- | ---------------------------------------- |
+| success   | boolean | 操作是否成功                             |
+| timestamp | string  | 响应生成时间（ISO 8601 格式）            |
+| page      | number  | 当前页码                                 |
+| limit     | number  | 每页数量                                 |
+| total     | number  | 服务端未删除笔记总数                     |
+| hasMore   | boolean | 是否还有更多数据（用于判断是否继续分页） |
+| count     | number  | 当前页实际返回的笔记数量                 |
+| data      | Array   | 笔记数据数组（包含完整字段）             |
+
+#### 客户端使用建议
+
+对于大量数据导出，建议客户端采用循环方式：
+
+```javascript
+async function exportAllNotes() {
+	let page = 1;
+	const limit = 100;
+	const allNotes = [];
+
+	while (true) {
+		const response = await fetch(`https://your-domain.com/api/notes/export/paged?page=${page}&limit=${limit}`, {
+			headers: {
+				Authorization: 'Bearer YOUR_API_KEY',
+			},
+		});
+
+		const result = await response.json();
+
+		// 收集数据
+		allNotes.push(...result.data);
+
+		console.log(`已导出 ${allNotes.length}/${result.total} 条笔记`);
+
+		// 判断是否还有更多数据
+		if (!result.hasMore) {
+			break;
+		}
+
+		page++;
+	}
+
+	return allNotes;
+}
+```
+
+> ⚠️ **注意事项**：
+>
+> - 建议在生产环境中添加适当的延迟（如 100-200ms）避免请求过于频繁
+> - 对于超大数量（>10000 条）的导出，考虑在服务端实现流式导出或异步任务
 
 ### 9. 批量插入或更新笔记
 
@@ -786,6 +897,57 @@ curl -X POST \
 1. **上传前**：确保每条笔记都有准确的 `updated_at` 时间戳
 2. **收到响应后**：检查 `skippedIds`，对这些笔记调用 `/api/notes/sync` 接口拉取服务端版本
 3. **冲突解决**：如果笔记被跳过，说明服务端有更新，客户端应使用同步接口获取最新状态
+
+## 代码质量与类型安全
+
+本项目采用严格的 TypeScript 类型检查和 ESLint 规范，确保代码质量和可维护性。
+
+### 类型安全措施
+
+1. **数据库接口类型定义**
+
+   ```typescript
+   // 数据库笔记行数据接口（原始数据库格式）
+   interface DbNoteRow {
+   	id: string;
+   	title: string;
+   	content: ArrayBuffer;
+   	iv?: ArrayBuffer | null;
+   	auth_tag?: ArrayBuffer | null;
+   	is_encrypted: number;
+   	is_deleted: number;
+   	created_at: string;
+   	updated_at: string;
+   }
+   ```
+
+2. **数据转换函数类型安全**
+
+   ```typescript
+   function convertNoteFromDb(row: DbNoteRow): Note {
+   	return {
+   		...row,
+   		content: row.content ? arrayBufferToBase64(row.content) : '',
+   		iv: row.iv ? arrayBufferToBase64(row.iv) : undefined,
+   		auth_tag: row.auth_tag ? arrayBufferToBase64(row.auth_tag) : undefined,
+   	};
+   }
+   ```
+
+3. **ESLint 规范遵守**
+   - 禁止使用 `console.log`（允许 `console.warn` 和 `console.error`）
+   - 避免使用 `any` 类型，使用具体的接口定义
+   - 严格的 TypeScript 类型检查
+
+### 性能优化
+
+1. **数据库查询优化**
+   - 分页导出接口使用批量查询，一次获取总数和分页数据
+   - 合理使用索引（`idx_notes_is_deleted_updated_at`）
+
+2. **内存管理**
+   - 分页导出避免一次性加载大量数据到内存
+   - Base64 编码在服务端完成，减少客户端处理负担
 
 ## 错误响应
 
