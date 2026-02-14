@@ -5,6 +5,37 @@ interface SqlCountResult {
 }
 
 /**
+ * 数据库笔记行数据接口（原始数据库格式）
+ */
+interface DbNoteRow {
+	id: string;
+	title: string;
+	content: ArrayBuffer;
+	iv?: ArrayBuffer | null;
+	auth_tag?: ArrayBuffer | null;
+	is_encrypted: number;
+	is_deleted: number;
+	created_at: string;
+	updated_at: string;
+}
+
+/**
+ * 数据库ID行数据接口
+ */
+interface DbIdRow {
+	id: string;
+}
+
+/**
+ * 数据库状态行数据接口
+ */
+interface DbStatusRow {
+	id: string;
+	is_deleted: number;
+	updated_at: string;
+}
+
+/**
  * Base64 字符串转换为 ArrayBuffer
  */
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -31,7 +62,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 /**
  * 将数据库返回的原始数据转换为 Note 对象
  */
-function convertNoteFromDb(row: any): Note {
+function convertNoteFromDb(row: DbNoteRow): Note {
 	return {
 		...row,
 		content: row.content ? arrayBufferToBase64(row.content) : '',
@@ -93,7 +124,7 @@ export const NoteRepo = {
 	// 根据ID查询笔记
 	findById: async (db: D1Database, id: string): Promise<Note | null> => {
 		const row = await db.prepare('SELECT * FROM notes WHERE id = ? AND is_deleted = 0').bind(id).first();
-		return row ? convertNoteFromDb(row) : null;
+		return row ? convertNoteFromDb(row as unknown as DbNoteRow) : null;
 	},
 
 	// 创建笔记
@@ -196,7 +227,33 @@ export const NoteRepo = {
 		const result = await db.prepare('SELECT * FROM notes WHERE is_deleted = 0 ORDER BY updated_at DESC').all();
 		return {
 			...result,
-			results: result.results.map((row) => convertNoteFromDb(row)),
+			results: result.results.map((row) => convertNoteFromDb(row as unknown as DbNoteRow)),
+		};
+	},
+
+	// 分页获取所有笔记（完整数据）
+	getAllFullPaged: async (
+		db: D1Database,
+		options: {
+			page: number;
+			limit: number;
+		},
+	) => {
+		const { page, limit } = options;
+		const offset = (page - 1) * limit;
+
+		const results = await db.batch([
+			db.prepare('SELECT COUNT(*) as total FROM notes WHERE is_deleted = 0'),
+			db.prepare('SELECT * FROM notes WHERE is_deleted = 0 ORDER BY updated_at DESC LIMIT ? OFFSET ?').bind(limit, offset),
+		]);
+
+		const total = (results[0].results[0] as SqlCountResult).total;
+		const data = results[1].results.map((row) => convertNoteFromDb(row as unknown as DbNoteRow));
+
+		return {
+			total,
+			data,
+			hasMore: offset + data.length < total,
 		};
 	},
 
@@ -282,28 +339,31 @@ export const NoteRepo = {
 			.prepare(query)
 			.bind(...ids)
 			.all();
-		return result.results.map((row) => convertNoteFromDb(row));
+		return result.results.map((row) => convertNoteFromDb(row as unknown as DbNoteRow));
 	},
 
 	// 查询更新时间大于指定时间戳的笔记（增量同步）- 包含已删除的
 	findByUpdatedAfter: async (db: D1Database, timestamp: string): Promise<Note[]> => {
 		const result = await db.prepare('SELECT * FROM notes WHERE updated_at > ?').bind(timestamp).all();
-		return result.results.map((row) => convertNoteFromDb(row));
+		return result.results.map((row) => convertNoteFromDb(row as unknown as DbNoteRow));
 	},
 
 	// 查询所有未删除的笔记ID列表
 	findAllIds: async (db: D1Database): Promise<string[]> => {
 		const result = await db.prepare('SELECT id FROM notes WHERE is_deleted = 0').all();
-		return result.results.map((row: any) => row.id as string);
+		return result.results.map((row) => (row as unknown as DbIdRow).id);
 	},
 
 	// 查询所有笔记ID和删除状态（用于同步）
 	findAllWithDeletedStatus: async (db: D1Database): Promise<{ id: string; is_deleted: number; updated_at: string }[]> => {
 		const result = await db.prepare('SELECT id, is_deleted, updated_at FROM notes').all();
-		return result.results.map((row: any) => ({
-			id: row.id as string,
-			is_deleted: row.is_deleted as number,
-			updated_at: row.updated_at as string,
-		}));
+		return result.results.map((row) => {
+			const typedRow = row as unknown as DbStatusRow;
+			return {
+				id: typedRow.id,
+				is_deleted: typedRow.is_deleted,
+				updated_at: typedRow.updated_at,
+			};
+		});
 	},
 };

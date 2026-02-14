@@ -23,7 +23,7 @@ notes.use('*', async (c, next) => {
 	return next();
 });
 
-// 导出所有笔记
+// 导出所有笔记（一次性导出，适用于小量数据）
 notes.get('/export/all', (c) =>
 	NoteRepo.getAllFull(c.env.DB).then((result) => {
 		c.header('Content-Disposition', 'attachment; filename="notes_backup.json"');
@@ -35,6 +35,25 @@ notes.get('/export/all', (c) =>
 		});
 	}),
 );
+
+// 分页导出笔记（适用于大量数据）
+notes.get('/export/paged', async (c) => {
+	const page = Math.max(1, parseInt(c.req.query('page') || '1'));
+	const limit = Math.max(1, Math.min(100, parseInt(c.req.query('limit') || '50')));
+
+	const result = await NoteRepo.getAllFullPaged(c.env.DB, { page, limit });
+
+	return c.json({
+		success: true,
+		timestamp: new Date().toISOString(),
+		page,
+		limit,
+		total: result.total,
+		hasMore: result.hasMore,
+		count: result.data.length,
+		data: result.data,
+	});
+});
 
 // 获取笔记标题列表
 notes.get('/', async (c) => {
@@ -230,7 +249,7 @@ notes.post('/batch', async (c) => {
 			}
 		}
 
-		console.log(`[Batch] Insert: ${notesToInsert.length}, Update: ${notesToUpdate.length}, Skip: ${notesToSkip.length}`);
+		console.warn(`[Batch] Insert: ${notesToInsert.length}, Update: ${notesToUpdate.length}, Skip: ${notesToSkip.length}`);
 
 		// 3. 执行批量操作
 		if (notesToInsert.length > 0) {
