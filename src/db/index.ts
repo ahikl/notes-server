@@ -4,9 +4,6 @@ interface SqlCountResult {
 	total: number;
 }
 
-/**
- * 数据库笔记行数据接口（原始数据库格式）
- */
 interface DbNoteRow {
 	id: string;
 	title: string;
@@ -19,25 +16,16 @@ interface DbNoteRow {
 	updated_at: string;
 }
 
-/**
- * 数据库ID行数据接口
- */
 interface DbIdRow {
 	id: string;
 }
 
-/**
- * 数据库状态行数据接口
- */
 interface DbStatusRow {
 	id: string;
 	is_deleted: number;
 	updated_at: string;
 }
 
-/**
- * Base64 字符串转换为 ArrayBuffer
- */
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
 	const binaryString = atob(base64);
 	const bytes = new Uint8Array(binaryString.length);
@@ -47,9 +35,6 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
 	return bytes.buffer;
 }
 
-/**
- * ArrayBuffer 转换为 Base64 字符串
- */
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
 	const bytes = new Uint8Array(buffer);
 	let binary = '';
@@ -59,9 +44,6 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 	return btoa(binary);
 }
 
-/**
- * 将数据库返回的原始数据转换为 Note 对象
- */
 function convertNoteFromDb(row: DbNoteRow): Note {
 	return {
 		...row,
@@ -72,7 +54,6 @@ function convertNoteFromDb(row: DbNoteRow): Note {
 }
 
 export const NoteRepo = {
-	// 分页查询笔记列表
 	findAll: async (
 		db: D1Database,
 		options: {
@@ -121,13 +102,11 @@ export const NoteRepo = {
 		};
 	},
 
-	// 根据ID查询笔记
 	findById: async (db: D1Database, id: string): Promise<Note | null> => {
 		const row = await db.prepare('SELECT * FROM notes WHERE id = ? AND is_deleted = 0').bind(id).first();
 		return row ? convertNoteFromDb(row as unknown as DbNoteRow) : null;
 	},
 
-	// 创建笔记
 	create: (
 		db: D1Database,
 		data: {
@@ -152,7 +131,7 @@ export const NoteRepo = {
 			.bind(data.id, data.title, contentBuffer, ivBuffer, authTagBuffer, data.is_encrypted, data.created_at, data.updated_at)
 			.run();
 	},
-	// 更新笔记
+
 	update: (
 		db: D1Database,
 		id: string,
@@ -206,11 +185,9 @@ export const NoteRepo = {
 			.run();
 	},
 
-	// 软删除笔记 - 只更新 is_deleted 和 updated_at，保持其他字段不变
 	delete: async (db: D1Database, id: string) =>
 		db.prepare('UPDATE notes SET is_deleted = 1, updated_at = ? WHERE id = ? AND is_deleted = 0').bind(new Date().toISOString(), id).run(),
 
-	// 批量软删除笔记 - 只更新 is_deleted 和 updated_at，保持其他字段不变
 	deleteMany: async (db: D1Database, ids: string[]): Promise<number> => {
 		if (ids.length === 0) return 0;
 		const placeholders = ids.map(() => '?').join(',');
@@ -222,7 +199,6 @@ export const NoteRepo = {
 		return result.meta.changes ?? 0;
 	},
 
-	// 获取所有笔记
 	getAllFull: async (db: D1Database) => {
 		const result = await db.prepare('SELECT * FROM notes WHERE is_deleted = 0 ORDER BY updated_at DESC').all();
 		return {
@@ -231,7 +207,6 @@ export const NoteRepo = {
 		};
 	},
 
-	// 分页获取所有笔记（完整数据）
 	getAllFullPaged: async (
 		db: D1Database,
 		options: {
@@ -257,7 +232,6 @@ export const NoteRepo = {
 		};
 	},
 
-	// 批量插入笔记（用于批量上传，不覆盖已有数据）
 	insertMany: async (db: D1Database, notes: Note[]) => {
 		if (notes.length === 0) return;
 
@@ -276,7 +250,6 @@ export const NoteRepo = {
 		await db.batch(batchInserts);
 	},
 
-	// 批量更新笔记（基于时间戳优先原则，只更新客户端较新的数据）
 	updateMany: async (db: D1Database, notes: Note[]) => {
 		if (notes.length === 0) return;
 
@@ -302,7 +275,6 @@ export const NoteRepo = {
 		await db.batch(batchUpdates);
 	},
 
-	// 批量插入或更新笔记（旧方法，保留用于兼容）
 	upsertMany: async (db: D1Database, notes: Note[]) => {
 		if (notes.length === 0) return;
 
@@ -330,7 +302,6 @@ export const NoteRepo = {
 		await db.batch(batchInserts);
 	},
 
-	// 根据ID列表查询笔记（包含已删除的，用于同步）
 	findByIds: async (db: D1Database, ids: string[]): Promise<Note[]> => {
 		if (ids.length === 0) return [];
 		const placeholders = ids.map(() => '?').join(',');
@@ -342,19 +313,16 @@ export const NoteRepo = {
 		return result.results.map((row) => convertNoteFromDb(row as unknown as DbNoteRow));
 	},
 
-	// 查询更新时间大于指定时间戳的笔记（增量同步）- 包含已删除的
 	findByUpdatedAfter: async (db: D1Database, timestamp: string): Promise<Note[]> => {
 		const result = await db.prepare('SELECT * FROM notes WHERE updated_at > ?').bind(timestamp).all();
 		return result.results.map((row) => convertNoteFromDb(row as unknown as DbNoteRow));
 	},
 
-	// 查询所有未删除的笔记ID列表
 	findAllIds: async (db: D1Database): Promise<string[]> => {
 		const result = await db.prepare('SELECT id FROM notes WHERE is_deleted = 0').all();
 		return result.results.map((row) => (row as unknown as DbIdRow).id);
 	},
 
-	// 查询所有笔记ID和删除状态（用于同步）
 	findAllWithDeletedStatus: async (db: D1Database): Promise<{ id: string; is_deleted: number; updated_at: string }[]> => {
 		const result = await db.prepare('SELECT id, is_deleted, updated_at FROM notes').all();
 		return result.results.map((row) => {
