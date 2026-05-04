@@ -2,32 +2,23 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import noteRoutes from './routes';
 
-/**
- * 环境绑定定义
- */
 export interface Env {
 	DB: D1Database;
 	API_KEY: string;
 }
 
-/**
- * 笔记数据结构定义
- */
 export interface Note {
 	id: string;
 	title: string;
-	content: string; // Base64编码的二进制数据
-	iv?: string; // Base64编码的IV（初始化向量）
-	auth_tag?: string; // Base64编码的认证标签
+	content: string;
+	iv?: string;
+	auth_tag?: string;
 	is_encrypted: number;
 	is_deleted: number;
 	created_at: string;
 	updated_at: string;
 }
 
-/**
- * 分页返回结构定义
- */
 export interface PaginatedResult<T> {
 	total: number;
 	data: T[];
@@ -50,7 +41,6 @@ app.onError((err, c) =>
 	),
 );
 
-// 4. 404 处理
 app.notFound((c) =>
 	c.json(
 		{
@@ -65,18 +55,12 @@ app.notFound((c) =>
 export default {
 	fetch: app.fetch,
 
-	/**
-	 * 处理定时任务 (Cron Trigger)
-	 */
 	async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
 		console.warn(`[Scheduled Task] 启动时间: ${new Date().toISOString()} | 触发规则: ${event.cron}`);
 		ctx.waitUntil(cleanupExpiredNotes(env));
 	},
 };
 
-/**
- * 辅助函数：清理 30 天前的软删除笔记
- */
 async function cleanupExpiredNotes(env: Env) {
 	try {
 		const RETENTION_DAYS = 30;

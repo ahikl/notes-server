@@ -1,17 +1,11 @@
 import { SyncRequest } from './types';
 
-/**
- * 验证错误结果
- */
 export interface ValidationError {
 	valid: false;
 	error: string;
 	message: string;
 }
 
-/**
- * 验证成功结果
- */
 export interface ValidationSuccess {
 	valid: true;
 	data: SyncRequest;
@@ -19,13 +13,7 @@ export interface ValidationSuccess {
 
 export type ValidationResult = ValidationError | ValidationSuccess;
 
-/**
- * 验证同步请求参数
- * @param body 请求体
- * @returns 验证结果
- */
 export function validateSyncRequest(body: unknown): ValidationResult {
-	// 验证基本结构
 	if (typeof body !== 'object' || body === null) {
 		return {
 			valid: false,
@@ -36,7 +24,6 @@ export function validateSyncRequest(body: unknown): ValidationResult {
 
 	const bodyRecord = body as Record<string, unknown>;
 
-	// 验证 localNoteIds
 	if (!isValidLocalNoteIds(bodyRecord)) {
 		return {
 			valid: false,
@@ -47,7 +34,6 @@ export function validateSyncRequest(body: unknown): ValidationResult {
 
 	const localNoteIds = bodyRecord.localNoteIds as string[];
 
-	// 验证 lastSyncTimestamp
 	const timestampValidation = validateTimestamp(bodyRecord);
 	if (!timestampValidation.valid) {
 		return timestampValidation;
@@ -55,7 +41,6 @@ export function validateSyncRequest(body: unknown): ValidationResult {
 
 	const lastSyncTimestamp = bodyRecord.lastSyncTimestamp as string;
 
-	// 验证 localDeletedNoteIds（可选）
 	const localDeletedNoteIds = validateDeletedNoteIds(bodyRecord);
 	if (localDeletedNoteIds === null) {
 		return {
@@ -75,16 +60,10 @@ export function validateSyncRequest(body: unknown): ValidationResult {
 	};
 }
 
-/**
- * 验证 localNoteIds 是否为有效数组
- */
 function isValidLocalNoteIds(body: Record<string, unknown>): boolean {
 	return Array.isArray(body.localNoteIds);
 }
 
-/**
- * 验证时间戳
- */
 function validateTimestamp(body: Record<string, unknown>): ValidationResult {
 	const lastSyncTimestamp = body.lastSyncTimestamp;
 
@@ -108,10 +87,6 @@ function validateTimestamp(body: Record<string, unknown>): ValidationResult {
 	return { valid: true, data: undefined as unknown as SyncRequest };
 }
 
-/**
- * 验证已删除笔记ID列表
- * @returns 验证通过的数组，如果格式无效返回 null
- */
 function validateDeletedNoteIds(body: Record<string, unknown>): string[] | null | undefined {
 	const { localDeletedNoteIds } = body;
 

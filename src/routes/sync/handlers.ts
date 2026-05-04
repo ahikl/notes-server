@@ -12,8 +12,6 @@ import {
 	DeleteMeta,
 } from './types';
 
-// ==================== 通用验证函数 ====================
-
 function validateTimestamp(timestamp: unknown): string | null {
 	if (!timestamp || typeof timestamp !== 'string') return null;
 	const date = new Date(timestamp);
@@ -27,12 +25,6 @@ function validateStringArray(arr: unknown): string[] | null {
 	return arr as string[];
 }
 
-// ==================== /sync/incremental 增量更新 ====================
-
-/**
- * 处理增量更新查询请求
- * 获取指定时间戳之后有更新的笔记（且未被删除）
- */
 export async function handleIncrementalSync(c: Context<{ Bindings: Env }>): Promise<Response> {
 	try {
 		const body = await c.req.json();
@@ -49,10 +41,8 @@ export async function handleIncrementalSync(c: Context<{ Bindings: Env }>): Prom
 
 		const clientNoteIdSet = new Set(localNoteIds);
 
-		// 获取增量更新（包含已删除的）
 		const incrementalUpdates = await NoteRepo.findByUpdatedAfter(c.env.DB, lastSyncTimestamp);
 
-		// 只返回客户端拥有的、且未删除的笔记
 		const notes: Note[] = incrementalUpdates.filter((note) => clientNoteIdSet.has(note.id) && note.is_deleted === 0);
 
 		const response: IncrementalSyncResponse = {
@@ -68,12 +58,6 @@ export async function handleIncrementalSync(c: Context<{ Bindings: Env }>): Prom
 	}
 }
 
-// ==================== /sync/deletions 删除同步 ====================
-
-/**
- * 处理删除同步请求
- * 获取服务端已删除但客户端未删除的笔记
- */
 export async function handleDeletionSync(c: Context<{ Bindings: Env }>): Promise<Response> {
 	try {
 		const body = await c.req.json();
@@ -91,14 +75,11 @@ export async function handleDeletionSync(c: Context<{ Bindings: Env }>): Promise
 		const clientDeletedIdSet = new Set(localDeletedNoteIds);
 		const clientNoteIdSet = new Set(localNoteIds);
 
-		// 获取服务端所有笔记状态
 		const serverNotesStatus = await NoteRepo.findAllWithDeletedStatus(c.env.DB);
 
-		// 找出服务端已删除但客户端未删除的笔记
 		const deletions: DeleteMeta[] = [];
 
 		for (const serverNote of serverNotesStatus) {
-			// 只处理客户端拥有的笔记
 			if (!clientNoteIdSet.has(serverNote.id)) continue;
 
 			if (serverNote.is_deleted === 1 && !clientDeletedIdSet.has(serverNote.id)) {
@@ -123,12 +104,6 @@ export async function handleDeletionSync(c: Context<{ Bindings: Env }>): Promise
 	}
 }
 
-// ==================== /sync/restore 恢复同步 ====================
-
-/**
- * 处理恢复同步请求
- * 获取客户端已删除但服务端未删除的笔记（需要恢复）
- */
 export async function handleRestoreSync(c: Context<{ Bindings: Env }>): Promise<Response> {
 	try {
 		const body = await c.req.json();
@@ -145,10 +120,8 @@ export async function handleRestoreSync(c: Context<{ Bindings: Env }>): Promise<
 
 		const clientDeletedIdSet = new Set(localDeletedNoteIds);
 
-		// 获取服务端所有活跃笔记ID
 		const serverNotesStatus = await NoteRepo.findAllWithDeletedStatus(c.env.DB);
 
-		// 找出客户端已删除但服务端未删除的笔记
 		const restoreIds: string[] = [];
 
 		for (const serverNote of serverNotesStatus) {
@@ -170,12 +143,6 @@ export async function handleRestoreSync(c: Context<{ Bindings: Env }>): Promise<
 	}
 }
 
-// ==================== /sync/new 新增笔记 ====================
-
-/**
- * 处理新增笔记查询请求
- * 获取服务端有但客户端没有的笔记ID
- */
 export async function handleNewNotes(c: Context<{ Bindings: Env }>): Promise<Response> {
 	try {
 		const body = await c.req.json();
@@ -187,10 +154,8 @@ export async function handleNewNotes(c: Context<{ Bindings: Env }>): Promise<Res
 
 		const clientNoteIdSet = new Set(localNoteIds);
 
-		// 获取服务端所有活跃笔记
 		const serverNotesStatus = await NoteRepo.findAllWithDeletedStatus(c.env.DB);
 
-		// 找出服务端有但客户端没有的活跃笔记
 		const newNoteIds: string[] = [];
 
 		for (const serverNote of serverNotesStatus) {
@@ -212,12 +177,6 @@ export async function handleNewNotes(c: Context<{ Bindings: Env }>): Promise<Res
 	}
 }
 
-// ==================== /sync/full-data 完整数据 ====================
-
-/**
- * 处理完整数据获取请求
- * 根据ID列表获取笔记完整数据
- */
 export async function handleFullData(c: Context<{ Bindings: Env }>): Promise<Response> {
 	try {
 		const body = await c.req.json();
@@ -236,7 +195,6 @@ export async function handleFullData(c: Context<{ Bindings: Env }>): Promise<Res
 			return c.json(response);
 		}
 
-		// 获取完整笔记数据
 		const notes = await NoteRepo.findByIds(c.env.DB, ids);
 
 		const response: FullDataResponse = {
@@ -252,12 +210,6 @@ export async function handleFullData(c: Context<{ Bindings: Env }>): Promise<Res
 	}
 }
 
-// ==================== /sync/status 状态查询 ====================
-
-/**
- * 处理状态查询请求
- * 获取客户端与服务端的状态差异统计
- */
 export async function handleStatusCheck(c: Context<{ Bindings: Env }>): Promise<Response> {
 	try {
 		const body = await c.req.json();
@@ -275,30 +227,25 @@ export async function handleStatusCheck(c: Context<{ Bindings: Env }>): Promise<
 		const clientDeletedIdSet = new Set(localDeletedNoteIds);
 		const clientNoteIdSet = new Set(localNoteIds);
 
-		// 获取服务端所有笔记状态
 		const serverNotesStatus = await NoteRepo.findAllWithDeletedStatus(c.env.DB);
 		const serverNoteMap = new Map(serverNotesStatus.map((n) => [n.id, n]));
 
-		// 统计
 		const serverActiveNoteIds = serverNotesStatus.filter((n) => n.is_deleted === 0).map((n) => n.id);
-		let clientHasServerMissing = 0; // 客户端有但服务端没有的笔记
-		let serverHasClientMissing = 0; // 服务端有但客户端没有的笔记
-		let deleteStatusMismatch = 0; // 删除状态不一致的数量
+		let clientHasServerMissing = 0;
+		let serverHasClientMissing = 0;
+		let deleteStatusMismatch = 0;
 
-		// 检查客户端笔记
 		for (const noteId of clientNoteIdSet) {
 			if (!serverNoteMap.has(noteId)) {
 				clientHasServerMissing++;
 			}
 		}
 
-		// 检查服务端笔记
 		for (const serverNote of serverNotesStatus) {
 			if (serverNote.is_deleted === 0 && !clientNoteIdSet.has(serverNote.id)) {
 				serverHasClientMissing++;
 			}
 
-			// 检查删除状态不一致
 			if (clientNoteIdSet.has(serverNote.id)) {
 				const isClientDeleted = clientDeletedIdSet.has(serverNote.id);
 				const isServerDeleted = serverNote.is_deleted === 1;
